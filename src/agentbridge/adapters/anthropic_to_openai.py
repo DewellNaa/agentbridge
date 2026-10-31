@@ -5,6 +5,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from agentbridge.adapters.base import BaseAdapter
+from agentbridge.adapters.cache_control import sanitize_cache_control
 from agentbridge.adapters.thinking import ThinkingTransformer
 from agentbridge.adapters.tools import ToolAdapter
 
@@ -17,6 +18,7 @@ class AnthropicToOpenAIAdapter(BaseAdapter):
 
     def convert_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Convert Anthropic /v1/messages payload to OpenAI /v1/chat/completions payload."""
+        payload = sanitize_cache_control(payload)
         anthropic_model = payload.get("model", "")
         target_model = self.model_map.get(anthropic_model, anthropic_model)
 

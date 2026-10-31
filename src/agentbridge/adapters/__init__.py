@@ -2,6 +2,7 @@
 
 from agentbridge.adapters.anthropic_to_openai import AnthropicToOpenAIAdapter
 from agentbridge.adapters.base import BaseAdapter
+from agentbridge.adapters.cache_control import sanitize_cache_control
 from agentbridge.adapters.thinking import ThinkingTransformer
 from agentbridge.adapters.tools import ToolAdapter
 
@@ -10,4 +11,5 @@ __all__ = [
     "AnthropicToOpenAIAdapter",
     "ThinkingTransformer",
     "ToolAdapter",
+    "sanitize_cache_control",
 ]

@@ -262,7 +262,9 @@ class StdioMCPTransport:
             self._shutdown(process)
 
         if "error" in response:
-            raise MCPTransportError(f"MCP request '{method}' failed: {response['error']!r}")
+            raise MCPTransportError(
+                f"MCP request '{method}' failed: {response['error']!r}"
+            )
         result = response.get("result")
         return result if isinstance(result, dict) else {}
 
@@ -405,9 +407,7 @@ class MCPProxy:
         if stripped.startswith("{"):
             return {
                 name: _expand_env_placeholders(server)
-                for name, server in _parse_config_document(
-                    json.loads(stripped)
-                ).items()
+                for name, server in _parse_config_document(json.loads(stripped)).items()
             }
         path = Path(stripped).expanduser()
         if not path.is_file():
@@ -473,8 +473,7 @@ class MCPProxy:
                         server=name,
                         name=str(raw["name"]),
                         description=str(raw.get("description", "")),
-                        input_schema=raw.get("inputSchema")
-                        or dict(_EMPTY_SCHEMA),
+                        input_schema=raw.get("inputSchema") or dict(_EMPTY_SCHEMA),
                     )
                     for raw in raw_tools
                     if isinstance(raw, dict) and raw.get("name")
@@ -499,7 +498,9 @@ class MCPProxy:
         The input list is not mutated. MCP tools whose qualified name is
         already present are skipped so upstream declarations win.
         """
-        existing = {tool.get("name") for tool in anthropic_tools if isinstance(tool, dict)}
+        existing = {
+            tool.get("name") for tool in anthropic_tools if isinstance(tool, dict)
+        }
         merged = list(anthropic_tools)
         for tool in self.list_tools(refresh=refresh):
             if tool.qualified_name not in existing:
@@ -514,7 +515,9 @@ class MCPProxy:
     # Execution proxying
     # ------------------------------------------------------------------
 
-    def execute_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def execute_tool(
+        self, name: str, arguments: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Invoke an MCP tool by its qualified name and return the raw result.
 
         Raises:
@@ -527,7 +530,9 @@ class MCPProxy:
         server, tool = parsed
         if server not in self._servers:
             raise KeyError(f"Unknown MCP server: {server!r}")
-        return self._rpc(server, "tools/call", {"name": tool, "arguments": arguments or {}})
+        return self._rpc(
+            server, "tools/call", {"name": tool, "arguments": arguments or {}}
+        )
 
     def call_tool(
         self,
@@ -547,9 +552,7 @@ class MCPProxy:
             return {
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
-                "content": [
-                    {"type": "text", "text": f"MCP tool call failed: {exc}"}
-                ],
+                "content": [{"type": "text", "text": f"MCP tool call failed: {exc}"}],
                 "is_error": True,
             }
         return {

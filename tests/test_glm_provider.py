@@ -79,9 +79,14 @@ def test_unknown_region_raises():
 
 def test_explicit_base_url_preserved():
     provider = make_provider(
-        make_config(api_key="zk-test-key", base_url="https://glm.example.com/api/paas/v4")
+        make_config(
+            api_key="zk-test-key", base_url="https://glm.example.com/api/paas/v4"
+        )
     )
-    assert str(provider.client.base_url).rstrip("/") == "https://glm.example.com/api/paas/v4"
+    assert (
+        str(provider.client.base_url).rstrip("/")
+        == "https://glm.example.com/api/paas/v4"
+    )
 
 
 # ----------------------------------------------------------------------
@@ -213,7 +218,11 @@ def test_cache_control_stripped_from_payload():
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
+                        {
+                            "type": "text",
+                            "text": "hi",
+                            "cache_control": {"type": "ephemeral"},
+                        }
                     ],
                 }
             ],
@@ -384,8 +393,6 @@ async def test_stream_survives_malformed_lines():
         return httpx.Response(200, content=sse_body.encode("utf-8"))
 
     provider = make_provider(transport=httpx.MockTransport(handler))
-    chunks = [
-        chunk async for chunk in provider.stream_complete({"messages": []})
-    ]
+    chunks = [chunk async for chunk in provider.stream_complete({"messages": []})]
     assert len(chunks) == 1
     assert chunks[0]["choices"][0]["delta"]["content"] == "ok"

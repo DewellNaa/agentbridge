@@ -76,7 +76,5 @@ def sanitize_cache_control(payload: Dict[str, Any]) -> Dict[str, Any]:
         True
     """
     if not isinstance(payload, dict):
-        raise TypeError(
-            f"payload must be a dict, got {type(payload).__name__}"
-        )
+        raise TypeError(f"payload must be a dict, got {type(payload).__name__}")
     return _sanitize(payload, {})

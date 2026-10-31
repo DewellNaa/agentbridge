@@ -197,7 +197,11 @@ def test_strips_every_marker_from_full_claude_code_payload():
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
+                    {
+                        "type": "text",
+                        "text": "hi",
+                        "cache_control": {"type": "ephemeral"},
+                    }
                 ],
             }
         ],
@@ -287,7 +291,10 @@ def test_shared_substructures_are_copied_consistently():
 
     clean = sanitize_cache_control(payload)
 
-    first, second = clean["messages"][0]["content"][0], clean["messages"][1]["content"][0]
+    first, second = (
+        clean["messages"][0]["content"][0],
+        clean["messages"][1]["content"][0],
+    )
     assert "cache_control" not in first and "cache_control" not in second
     assert first is second  # shared object stays shared, not duplicated
 
@@ -298,7 +305,11 @@ def test_input_payload_is_not_mutated():
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
+                    {
+                        "type": "text",
+                        "text": "hi",
+                        "cache_control": {"type": "ephemeral"},
+                    }
                 ],
             }
         ]

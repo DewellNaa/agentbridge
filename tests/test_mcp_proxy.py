@@ -238,7 +238,9 @@ class TestConfigLoading:
             DEFAULT_CONFIG_ENV_VAR,
             json.dumps({"mcpServers": {"from-env": {"command": "env"}}}),
         )
-        proxy = MCPProxy(config={"from-inline": {"command": "inline"}}, config_file=None)
+        proxy = MCPProxy(
+            config={"from-inline": {"command": "inline"}}, config_file=None
+        )
         assert list(proxy.servers) == ["from-inline"]
 
     def test_env_placeholders_are_expanded(self, clean_env, monkeypatch):
@@ -268,9 +270,7 @@ def make_proxy(transport, servers):
     # Tag each server config with its name so FakeTransport can key responses;
     # MCPProxy treats server configs as opaque dicts, so this is transparent.
     tagged = {name: {**cfg, "_name": name} for name, cfg in servers.items()}
-    return MCPProxy(
-        config=tagged, env_var=None, config_file=None, transport=transport
-    )
+    return MCPProxy(config=tagged, env_var=None, config_file=None, transport=transport)
 
 
 class TestToolConversion:
@@ -306,9 +306,7 @@ class TestToolConversion:
             {"weather": {"command": "uvx"}},
         )
         (tool,) = proxy.get_anthropic_tools()
-        assert tool["description"] == (
-            "MCP tool 'ping' provided by server 'weather'."
-        )
+        assert tool["description"] == ("MCP tool 'ping' provided by server 'weather'.")
 
     def test_server_and_tool_names_are_sanitized(self):
         proxy = make_proxy(
@@ -407,9 +405,7 @@ class TestToolConversion:
             {"broken": {"command": "x"}, "weather": {"command": "uvx"}},
         )
         tools = proxy.list_tools()
-        assert [tool.qualified_name for tool in tools] == [
-            "mcp__weather__get_forecast"
-        ]
+        assert [tool.qualified_name for tool in tools] == ["mcp__weather__get_forecast"]
         assert "broken" in proxy.last_errors
         assert "boom" in proxy.last_errors["broken"]
 
@@ -430,9 +426,7 @@ class TestToolExecution:
         transport = FakeTransport(tools={"weather": WEATHER_TOOLS})
         proxy = make_proxy(transport, {"weather": {"command": "uvx", "args": ["w"]}})
         proxy.list_tools()
-        result = proxy.execute_tool(
-            "mcp__weather__get_forecast", {"city": "Beijing"}
-        )
+        result = proxy.execute_tool("mcp__weather__get_forecast", {"city": "Beijing"})
         assert result == {
             "content": [{"type": "text", "text": "ok:get_forecast"}],
             "isError": False,
@@ -610,9 +604,7 @@ class TestStdioTransport:
 
     def test_end_to_end_stdio_roundtrip(self, server_script):
         proxy = MCPProxy(
-            config={
-                "local": {"command": sys.executable, "args": [str(server_script)]}
-            },
+            config={"local": {"command": sys.executable, "args": [str(server_script)]}},
             env_var=None,
             config_file=None,
         )

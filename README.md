@@ -14,6 +14,9 @@
 
 - **⚡ Zero-Config Local Gateway**: Instant startup via `agentbridge start`, zero database required, lightweight async architecture.
 - **🧠 Full Thinking/Reasoning Translation**: Bridges DeepSeek-R1 / GLM-5.3 `delta.reasoning_content` to Claude 3.7 `thinking` content blocks and back in real-time.
+- **🛡️ Prompt Caching Fault Tolerance**: Automatically detects and sanitizes Anthropic `cache_control: {"type": "ephemeral"}` metadata recursively across system prompts, messages, and tools, preventing `400 Bad Request` errors on standard upstream LLMs.
+- **🇨🇳 Native Zhipu BigModel / GLM-5.3 Adapter**: First-class support for BigModel authentication, GLM-5.3 / GLM-5.3-Flash model aliasing, thinking effort levels, and SSE streaming normalization.
+- **🔌 Local MCP (Model Context Protocol) Relay**: Auto-discovers `~/.claude/mcp.json` or custom configurations, manages local stdio MCP subprocesses, namespaces tools (`mcp__<server>__<tool>`), and dynamically multiplexes them into agent requests.
 - **🛠️ Robust Tool Calling**: Automatically converts Anthropic `tool_use` / `tool_result` into OpenAI function calling and stitches streaming partial JSON chunks without crashing.
 - **📡 Strict SSE Stream Conformance**: Zero dropped frames, accurate `message_start` -> `content_block_start` -> `content_block_delta` -> `content_block_stop` -> `message_stop` state sequences.
 - **🔄 Model Aliasing & Routing**: Transparently alias `claude-3-5-sonnet-20241022` or `claude-3-7-sonnet-20250219` to your favorite low-cost or local models.
@@ -32,12 +35,21 @@ pip install -e .
 
 ### 2. Start the Gateway
 
+#### Option A: With DeepSeek / OpenAI-compatible upstream
 ```bash
-# Point to your OpenAI-compatible upstream (e.g. DeepSeek, GLM, vLLM, Ollama)
 agentbridge start \
   --upstream-url "https://api.deepseek.com/v1" \
-  --upstream-key "your-api-key" \
+  --upstream-key "your-deepseek-api-key" \
   --model "deepseek-chat" \
+  --port 8080
+```
+
+#### Option B: With Zhipu BigModel / GLM-5.3
+```bash
+agentbridge start \
+  --upstream-url "https://open.bigmodel.cn/api/paas/v4" \
+  --upstream-key "your-bigmodel-api-key" \
+  --model "glm-5.3-flash" \
   --port 8080
 ```
 

@@ -9,9 +9,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from agentbridge.adapters.anthropic_to_openai import AnthropicToOpenAIAdapter
 from agentbridge.adapters.thinking import ThinkingTransformer
-from agentbridge.config import BridgeConfig
+from agentbridge.config import BridgeConfig, UpstreamConfig
 from agentbridge.mcp.proxy import MCPProxy
 from agentbridge.providers.factory import create_upstream_client
+from agentbridge.routing.pool import FailoverRouter, UpstreamEndpoint
 from agentbridge.streaming.sse import format_sse
 from agentbridge.telemetry.display import log_request_metric
 from agentbridge.telemetry.metrics import RequestMetric, TelemetryManager
@@ -28,10 +29,56 @@ def _extract_usage(usage: Dict[str, Any]) -> Dict[str, int]:
     }
 
 
+def _build_endpoints(config: BridgeConfig) -> list:
+    """Build the failover pool from the upstream configuration.
+
+    One endpoint is created per configured API key (``key-1``, ``key-2``,
+    ...), plus a ``fallback`` endpoint when ``fallback_url`` is set.
+    """
+    upstream: UpstreamConfig = config.upstream
+    endpoints: list[UpstreamEndpoint] = []
+
+    if upstream.api_keys:
+        for index, key in enumerate(upstream.api_keys):
+            endpoint_config = upstream.model_copy(
+                update={"name": f"key-{index + 1}", "api_key": key}
+            )
+            endpoints.append(
+                UpstreamEndpoint(
+                    name=f"key-{index + 1}",
+                    client=create_upstream_client(endpoint_config),
+                )
+            )
+    else:
+        endpoints.append(
+            UpstreamEndpoint(
+                name=upstream.name, client=create_upstream_client(upstream)
+            )
+        )
+
+    if upstream.fallback_url:
+        fallback_config = upstream.model_copy(
+            update={
+                "name": "fallback",
+                "base_url": upstream.fallback_url,
+                "api_key": upstream.fallback_key or upstream.api_key,
+                "default_model": upstream.fallback_model or upstream.default_model,
+            }
+        )
+        endpoints.append(
+            UpstreamEndpoint(
+                name="fallback", client=create_upstream_client(fallback_config)
+            )
+        )
+
+    return endpoints
+
+
 def create_app(config: BridgeConfig) -> FastAPI:
     """Create and configure the FastAPI application."""
     adapter = AnthropicToOpenAIAdapter(model_map=config.model_mapping)
-    client = create_upstream_client(config.upstream)
+    endpoints = _build_endpoints(config)
+    router = FailoverRouter(endpoints, strategy=config.upstream.failover_strategy)
     mcp_proxy = (
         MCPProxy(config_path=config.mcp_config_path) if config.enable_mcp else None
     )
@@ -43,7 +90,7 @@ def create_app(config: BridgeConfig) -> FastAPI:
         yield
         if mcp_proxy is not None:
             await mcp_proxy.stop_all()
-        await client.close()
+        await router.close()
 
     app = FastAPI(
         title="AgentBridge",
@@ -52,7 +99,12 @@ def create_app(config: BridgeConfig) -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.state.client = client
+    # ``client`` is kept as the primary endpoint's client so existing
+    # integrations (and tests) that patch it keep working; the router
+    # holds the same instances.
+    app.state.client = endpoints[0].client
+    app.state.router = router
+    app.state.endpoints = endpoints
     app.state.mcp_proxy = mcp_proxy
     telemetry = TelemetryManager()
     app.state.telemetry = telemetry
@@ -99,6 +151,16 @@ def create_app(config: BridgeConfig) -> FastAPI:
         tools = mcp_proxy.get_anthropic_tools()
         return {"status": "ok", "tools": tools, "count": len(mcp_proxy.tools)}
 
+    @app.get("/v1/failover/status")
+    async def failover_status():
+        """Report the health of every endpoint in the failover pool."""
+        return {
+            "status": "ok",
+            "strategy": router.strategy,
+            "count": len(endpoints),
+            "endpoints": router.get_pool_status(),
+        }
+
     @app.post("/v1/messages")
     async def create_message(
         request: Request,
@@ -132,7 +194,7 @@ def create_app(config: BridgeConfig) -> FastAPI:
 
         if not is_stream:
             try:
-                upstream_resp = await client.complete(openai_req)
+                upstream_resp, _endpoint_name = await router.complete(openai_req)
                 anthropic_resp = adapter.convert_response(upstream_resp)
             except Exception as e:
                 telemetry.finish_request(metric, status_code=502, error_message=str(e))
@@ -181,7 +243,7 @@ def create_app(config: BridgeConfig) -> FastAPI:
                             telemetry.record_tool_call(metric, name)
 
             try:
-                async for chunk in client.stream_complete(openai_req):
+                async for chunk in router.stream_complete(openai_req):
                     track_chunk(chunk)
                     events = adapter.convert_stream_chunk(chunk, context)
                     for ev in events:

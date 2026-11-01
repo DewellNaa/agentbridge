@@ -47,6 +47,33 @@ def create_parser() -> argparse.ArgumentParser:
         help="Upstream API key (defaults to OPENAI_API_KEY env var)",
     )
     start_parser.add_argument(
+        "--upstream-keys",
+        default=None,
+        help="Comma-separated upstream API keys for load rotation "
+        "(e.g. key1,key2,key3)",
+    )
+    start_parser.add_argument(
+        "--fallback-url",
+        default=None,
+        help="Fallback upstream base URL used when primary keys fail",
+    )
+    start_parser.add_argument(
+        "--fallback-key",
+        default=None,
+        help="API key for the fallback upstream",
+    )
+    start_parser.add_argument(
+        "--fallback-model",
+        default=None,
+        help="Model name used on the fallback upstream",
+    )
+    start_parser.add_argument(
+        "--strategy",
+        choices=["priority", "round_robin"],
+        default="priority",
+        help="Failover pool routing strategy (default: priority)",
+    )
+    start_parser.add_argument(
         "--model",
         default=None,
         help="Target upstream model name (e.g. deepseek-chat, glm-4-plus)",
@@ -172,6 +199,15 @@ def print_startup_banner(config: BridgeConfig):
         "[bold cyan]Provider:[/bold cyan]",
         f"{provider_type} ({config.upstream.name})",
     )
+    endpoint_count = len(config.upstream.api_keys) + (
+        1 if config.upstream.fallback_url else 0
+    )
+    if endpoint_count > 1:
+        table.add_row(
+            "[bold cyan]Failover Pool:[/bold cyan]",
+            f"Active (Strategy: {config.upstream.failover_strategy}, "
+            f"Endpoints: {endpoint_count})",
+        )
     if config.ollama_mode:
         table.add_row(
             "[bold cyan]Ollama Auto-Discovery:[/bold cyan]",
@@ -396,6 +432,18 @@ def main():
             config.upstream.base_url = args.upstream_url
         if hasattr(args, "upstream_key") and args.upstream_key:
             config.upstream.api_key = args.upstream_key
+        if getattr(args, "upstream_keys", None):
+            config.upstream.api_keys = [
+                key.strip() for key in args.upstream_keys.split(",") if key.strip()
+            ]
+        if getattr(args, "fallback_url", None):
+            config.upstream.fallback_url = args.fallback_url
+        if getattr(args, "fallback_key", None):
+            config.upstream.fallback_key = args.fallback_key
+        if getattr(args, "fallback_model", None):
+            config.upstream.fallback_model = args.fallback_model
+        if getattr(args, "strategy", None):
+            config.upstream.failover_strategy = args.strategy
         if hasattr(args, "model") and args.model:
             config.upstream.default_model = args.model
         if hasattr(args, "debug") and args.debug:

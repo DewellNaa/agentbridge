@@ -1,13 +1,15 @@
 """Configuration management for AgentBridge."""
 
 import os
-from typing import Dict
+from typing import Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentbridge.discovery.ollama import parse_ollama_host
 
 _TRUTHY = ("true", "1", "yes")
+
+_FAILOVER_STRATEGIES = ("priority", "round_robin")
 
 
 class UpstreamConfig(BaseModel):
@@ -22,6 +24,32 @@ class UpstreamConfig(BaseModel):
 
     # Ollama local mode: target the zero-config local Ollama endpoint.
     ollama_mode: bool = False
+
+    # Multi-key rotation & failover pool.
+    # ``api_keys`` accepts a comma-separated string (e.g. "key1,key2").
+    api_keys: List[str] = Field(default_factory=list)
+    fallback_url: str | None = None
+    fallback_key: str | None = None
+    fallback_model: str | None = None
+    failover_strategy: str = "priority"  # "priority" 或 "round_robin"
+
+    @field_validator("api_keys", mode="before")
+    @classmethod
+    def _split_api_keys(cls, value):
+        """Allow ``api_keys="k1,k2"`` by splitting the comma-joined string."""
+        if isinstance(value, str):
+            return [key.strip() for key in value.split(",") if key.strip()]
+        return value
+
+    @field_validator("failover_strategy")
+    @classmethod
+    def _validate_failover_strategy(cls, value: str) -> str:
+        if value not in _FAILOVER_STRATEGIES:
+            raise ValueError(
+                f"failover_strategy must be one of {_FAILOVER_STRATEGIES}, "
+                f"got {value!r}"
+            )
+        return value
 
 
 def ollama_base_url() -> str:
@@ -70,9 +98,30 @@ class BridgeConfig(BaseModel):
         enable_mcp = os.getenv("AGENTBRIDGE_ENABLE_MCP", "").strip().lower() in _TRUTHY
         mcp_config_path = os.getenv("AGENTBRIDGE_MCP_CONFIG") or None
 
+        # Multi-key rotation & failover pool settings.
+        api_keys = [
+            key.strip()
+            for key in os.getenv("AGENTBRIDGE_UPSTREAM_KEYS", "").split(",")
+            if key.strip()
+        ]
+        fallback_url = os.getenv("AGENTBRIDGE_FALLBACK_URL") or None
+        fallback_key = os.getenv("AGENTBRIDGE_FALLBACK_KEY") or None
+        fallback_model = os.getenv("AGENTBRIDGE_FALLBACK_MODEL") or None
+        failover_strategy = (
+            os.getenv("AGENTBRIDGE_FAILOVER_STRATEGY", "priority").strip().lower()
+            or "priority"
+        )
+
         # Ollama mode is opt-in via AGENTBRIDGE_OLLAMA; OLLAMA_HOST only
         # supplies the host:port defaults used by that mode.
         ollama_mode = os.getenv("AGENTBRIDGE_OLLAMA", "").strip().lower() in _TRUTHY
+        pool_kwargs = {
+            "api_keys": api_keys,
+            "fallback_url": fallback_url,
+            "fallback_key": fallback_key,
+            "fallback_model": fallback_model,
+            "failover_strategy": failover_strategy,
+        }
         if ollama_mode:
             upstream = UpstreamConfig(
                 name="ollama",
@@ -80,6 +129,7 @@ class BridgeConfig(BaseModel):
                 api_key="ollama",
                 default_model=os.getenv("AGENTBRIDGE_DEFAULT_MODEL", "qwen2.5-coder"),
                 ollama_mode=True,
+                **pool_kwargs,
             )
         else:
             upstream = UpstreamConfig(
@@ -93,6 +143,7 @@ class BridgeConfig(BaseModel):
                     os.getenv("OPENAI_API_KEY", ""),
                 ),
                 default_model=os.getenv("AGENTBRIDGE_DEFAULT_MODEL", "gpt-4o"),
+                **pool_kwargs,
             )
 
         return cls(

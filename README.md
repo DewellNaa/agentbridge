@@ -17,6 +17,7 @@
 - **⚡ Zero-Config Local Gateway**: Instant startup via `agentbridge start`, zero database required, lightweight async architecture.
 - **🧠 Full Thinking/Reasoning Translation**: Bridges DeepSeek-R1 / GLM-5.3 `delta.reasoning_content` to Claude 3.7 `thinking` content blocks and back in real-time.
 - **🛡️ Prompt Caching Fault Tolerance**: Automatically detects and sanitizes Anthropic `cache_control: {"type": "ephemeral"}` metadata recursively across system prompts, messages, and tools, preventing `400 Bad Request` errors on standard upstream LLMs.
+- **🦙 Ollama Local LLM Auto-Discovery**: Run `agentbridge start --ollama` to automatically discover local Ollama models, benchmark and score coding candidates (`qwen2.5-coder`, `deepseek-r1`), and enable 100% offline, privacy-first AI coding.
 - **🇨🇳 Native Zhipu BigModel / GLM-5.3 Adapter**: First-class support for BigModel authentication, GLM-5.3 / GLM-5.3-Flash model aliasing, thinking effort levels, and SSE streaming normalization.
 - **🔌 Local MCP (Model Context Protocol) Relay**: Auto-discovers `~/.claude/mcp.json` or custom configurations, manages local stdio MCP subprocesses, namespaces tools (`mcp__<server>__<tool>`), and dynamically multiplexes them into agent requests.
 - **📊 Live Terminal Telemetry**: Real-time TTFT (Time to First Token) tracker, reasoning token throughput counter, and Rich dashboard via `agentbridge metrics`.
@@ -80,7 +81,19 @@ agentbridge start \
   --port 8080
 ```
 
-### 3. Connect Your Coding Agent
+#### Option C: With Local Ollama (Zero-Config Auto-Discovery)
+```bash
+# Auto-detects local Ollama instance and selects best coding model (e.g. qwen2.5-coder, deepseek-r1)
+agentbridge start --ollama
+
+# Or specify an exact local Ollama model
+agentbridge start --ollama deepseek-r1:14b
+
+# Inspect installed Ollama models & coding scores
+agentbridge ollama
+```
+
+### 4. Connect Your Coding Agent
 
 #### 🤖 Claude Code
 ```bash

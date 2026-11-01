@@ -1,6 +1,7 @@
 """Command-line interface for AgentBridge."""
 
 import argparse
+import os
 
 import uvicorn
 from rich.console import Console
@@ -73,6 +74,20 @@ def create_parser() -> argparse.ArgumentParser:
         "--no-telemetry-log",
         action="store_true",
         help="Disable per-request telemetry logs in the console",
+    )
+    start_parser.add_argument(
+        "--ollama",
+        nargs="?",
+        const="auto",
+        default=None,
+        help="Connect to local Ollama with auto-discovery "
+        "(optionally specify model name, e.g. --ollama qwen2.5-coder:14b)",
+    )
+
+    # ollama command
+    subparsers.add_parser(
+        "ollama",
+        help="List local Ollama models with coding-fit scores and a recommendation",
     )
 
     # metrics command
@@ -157,6 +172,15 @@ def print_startup_banner(config: BridgeConfig):
         "[bold cyan]Provider:[/bold cyan]",
         f"{provider_type} ({config.upstream.name})",
     )
+    if config.ollama_mode:
+        table.add_row(
+            "[bold cyan]Ollama Auto-Discovery:[/bold cyan]",
+            f"Active (Target: {config.upstream.default_model})",
+        )
+        table.add_row(
+            "[bold cyan]Local Models:[/bold cyan]",
+            str(config.ollama_model_count),
+        )
     if config.enable_mcp:
         mcp_status = "[green]enabled[/green]"
         if config.mcp_config_path:
@@ -229,6 +253,133 @@ def config_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def apply_ollama_config(config: BridgeConfig, ollama_arg: str) -> int:
+    """Wire ``config`` to a local Ollama instance via auto-discovery.
+
+    ``ollama_arg`` is ``"auto"`` (plain ``--ollama``) for best-model
+    selection, or an explicit model name. Returns a process exit code
+    (0 on success, 1 when Ollama is unreachable or has no models).
+    """
+    from agentbridge.discovery.ollama import (
+        check_ollama_running,
+        discover_ollama_models,
+        parse_ollama_host,
+        select_best_ollama_model,
+    )
+
+    host, port = parse_ollama_host(os.getenv("OLLAMA_HOST", ""))
+    endpoint = f"http://{host}:{port}"
+
+    if not check_ollama_running(host, port):
+        console.print(
+            f"[red]Error:[/red] Ollama is not running at {endpoint}. "
+            "Please start Ollama or download it from https://ollama.com"
+        )
+        return 1
+
+    if ollama_arg == "auto":
+        models = discover_ollama_models(host, port)
+        config.ollama_model_count = len(models)
+        best = select_best_ollama_model(models)
+        if best is None:
+            console.print(
+                "[yellow]No Ollama models installed.[/yellow] "
+                "Pull a coding model first:\n"
+                "  [green]ollama pull qwen2.5-coder[/green]"
+            )
+            return 1
+        model = best.name
+        console.print(
+            f"[bold cyan]Ollama Auto-Discovery:[/bold cyan] selected "
+            f"[green]{model}[/green] (score {best.score}) from "
+            f"{len(models)} local model(s)"
+        )
+    else:
+        model = ollama_arg
+        try:
+            config.ollama_model_count = len(discover_ollama_models(host, port))
+        except Exception:
+            config.ollama_model_count = 0
+
+    config.ollama_mode = True
+    config.upstream.name = "ollama"
+    config.upstream.base_url = f"{endpoint}/v1"
+    config.upstream.default_model = model
+    config.upstream.api_key = "ollama"
+    config.upstream.ollama_mode = True
+    return 0
+
+
+def ollama_command(args: argparse.Namespace) -> int:
+    """Handle `agentbridge ollama`: list local models with coding scores."""
+    from agentbridge.discovery.ollama import (
+        check_ollama_running,
+        discover_ollama_models,
+        parse_ollama_host,
+        select_best_ollama_model,
+    )
+
+    host, port = parse_ollama_host(os.getenv("OLLAMA_HOST", ""))
+    if not check_ollama_running(host, port):
+        console.print(
+            f"[red]Error:[/red] Ollama is not running at http://{host}:{port}. "
+            "Please start Ollama or download it from https://ollama.com"
+        )
+        return 1
+    try:
+        models = discover_ollama_models(host, port)
+    except Exception as exc:
+        console.print(f"[red]Error:[/red] Failed to query Ollama: {exc}")
+        return 1
+
+    if not models:
+        console.print(
+            "[yellow]No Ollama models installed.[/yellow] Pull a coding model:\n"
+            "  [green]ollama pull qwen2.5-coder[/green]"
+        )
+        return 0
+
+    best = select_best_ollama_model(models)
+    table = Table(title=f"Ollama Local Models ({len(models)})")
+    table.add_column("Model", style="cyan")
+    table.add_column("Params")
+    table.add_column("Quantization")
+    table.add_column("Size", justify="right")
+    table.add_column("Coding Score", justify="right")
+    for model in models:
+        is_best = best is not None and model.name == best.name
+        if is_best:
+            name = f"[bold green]★ {model.name}[/bold green]"
+            score = f"[bold green]{model.score}[/bold green]"
+        else:
+            name = model.name
+            score = str(model.score)
+        table.add_row(
+            name,
+            model.parameter_size or "-",
+            model.quantization_level or "-",
+            _human_size(model.size_bytes),
+            score,
+        )
+    console.print(table)
+    if best is not None:
+        console.print(
+            f"Recommended for coding: [bold green]{best.name}[/bold green] "
+            f"(score {best.score})"
+        )
+    return 0
+
+
+def _human_size(size_bytes: int) -> str:
+    """Format a byte count as a compact human-readable string."""
+    size = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 def main():
     """Main CLI entrypoint."""
     parser = create_parser()
@@ -258,6 +409,12 @@ def main():
         if getattr(args, "no_telemetry_log", False):
             config.telemetry_log = False
 
+        ollama_arg = getattr(args, "ollama", None)
+        if ollama_arg is not None:
+            exit_code = apply_ollama_config(config, ollama_arg)
+            if exit_code != 0:
+                raise SystemExit(exit_code)
+
         print_startup_banner(config)
         app = create_app(config)
         uvicorn.run(app, host=config.host, port=config.port, log_level="info")
@@ -267,6 +424,8 @@ def main():
         raise SystemExit(run_command(args))
     elif args.command == "config":
         raise SystemExit(config_command(args))
+    elif args.command == "ollama":
+        raise SystemExit(ollama_command(args))
     else:
         parser.print_help()
 

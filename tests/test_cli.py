@@ -1,4 +1,4 @@
-"""Tests for the CLI: run/config subcommands and argument parsing."""
+"""Tests for the CLI: run/config/ollama subcommands and argument parsing."""
 
 import sys
 
@@ -6,6 +6,8 @@ import pytest
 
 from agentbridge import cli
 from agentbridge import launcher as launcher_module
+from agentbridge.config import BridgeConfig
+from agentbridge.discovery.ollama import OllamaModelInfo
 
 # ---------------------------------------------------------------------------
 # `run` argument parsing
@@ -66,6 +68,193 @@ class TestRunParser:
         with pytest.raises(SystemExit) as exc:
             self.parse(["run"])
         assert exc.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# `start --ollama` argument parsing
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaParser:
+    def parse(self, argv):
+        return cli.create_parser().parse_args(argv)
+
+    def test_ollama_flag_defaults_to_auto(self):
+        args = self.parse(["start", "--ollama"])
+        assert args.ollama == "auto"
+
+    def test_ollama_with_model_name(self):
+        args = self.parse(["start", "--ollama", "qwen2.5-coder:14b"])
+        assert args.ollama == "qwen2.5-coder:14b"
+
+    def test_ollama_absent_is_none(self):
+        args = self.parse(["start"])
+        assert args.ollama is None
+
+
+# ---------------------------------------------------------------------------
+# `start --ollama` wiring
+# ---------------------------------------------------------------------------
+
+
+def patch_discovery(monkeypatch, *, running=True, models=None):
+    """Patch the discovery functions used by the CLI."""
+    import agentbridge.discovery.ollama as discovery
+
+    monkeypatch.setattr(
+        discovery, "check_ollama_running", lambda *a, **k: running, raising=True
+    )
+    monkeypatch.setattr(
+        discovery,
+        "discover_ollama_models",
+        lambda *a, **k: models if models is not None else [],
+        raising=True,
+    )
+
+
+class TestApplyOllamaConfig:
+    def test_auto_selects_best_model(self, monkeypatch):
+        patch_discovery(
+            monkeypatch,
+            models=[
+                OllamaModelInfo(name="llama3:8b", score=40),
+                OllamaModelInfo(name="qwen2.5-coder:14b", score=185),
+            ],
+        )
+        config = BridgeConfig()
+        assert cli.apply_ollama_config(config, "auto") == 0
+        assert config.ollama_mode is True
+        assert config.upstream.name == "ollama"
+        assert config.upstream.base_url == "http://127.0.0.1:11434/v1"
+        assert config.upstream.default_model == "qwen2.5-coder:14b"
+        assert config.upstream.api_key == "ollama"
+        assert config.upstream.ollama_mode is True
+        assert config.ollama_model_count == 2
+
+    def test_explicit_model_is_used(self, monkeypatch):
+        patch_discovery(monkeypatch, models=[])
+        config = BridgeConfig()
+        assert cli.apply_ollama_config(config, "deepseek-r1:14b") == 0
+        assert config.upstream.default_model == "deepseek-r1:14b"
+        assert config.upstream.base_url == "http://127.0.0.1:11434/v1"
+
+    def test_not_running_returns_exit_code_one(self, monkeypatch, capsys):
+        patch_discovery(monkeypatch, running=False)
+        config = BridgeConfig()
+        assert cli.apply_ollama_config(config, "auto") == 1
+        out = capsys.readouterr().out
+        assert "Ollama is not running at http://127.0.0.1:11434" in out
+        assert "https://ollama.com" in out
+        assert config.ollama_mode is False
+
+    def test_auto_without_models_returns_exit_code_one(self, monkeypatch, capsys):
+        patch_discovery(monkeypatch, models=[])
+        config = BridgeConfig()
+        assert cli.apply_ollama_config(config, "auto") == 1
+        out = capsys.readouterr().out
+        assert "ollama pull qwen2.5-coder" in out
+
+
+class TestOllamaCommand:
+    def test_main_lists_models_and_highlights_best(self, monkeypatch, capsys):
+        patch_discovery(
+            monkeypatch,
+            models=[
+                OllamaModelInfo(
+                    name="qwen2.5-coder:14b",
+                    score=185,
+                    parameter_size="14.8B",
+                    quantization_level="Q4_K_M",
+                    size_bytes=8_989_452_339,
+                ),
+                OllamaModelInfo(name="llama3:8b", score=40, parameter_size="8B"),
+            ],
+        )
+        monkeypatch.setattr(sys, "argv", ["agentbridge", "ollama"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "qwen2.5-coder:14b" in out
+        assert "llama3:8b" in out
+        assert "14.8B" in out
+        assert "Q4_K_M" in out
+        assert "8.4 GB" in out
+        assert "185" in out
+        assert "★" in out
+        assert "Recommended" in out
+
+    def test_main_exits_one_when_not_running(self, monkeypatch, capsys):
+        patch_discovery(monkeypatch, running=False)
+        monkeypatch.setattr(sys, "argv", ["agentbridge", "ollama"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        assert "Ollama is not running" in capsys.readouterr().out
+
+    def test_main_empty_library_suggests_pull(self, monkeypatch, capsys):
+        patch_discovery(monkeypatch, models=[])
+        monkeypatch.setattr(sys, "argv", ["agentbridge", "ollama"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 0
+        assert "ollama pull qwen2.5-coder" in capsys.readouterr().out
+
+    def test_main_start_ollama_not_running_exits_one(self, monkeypatch, capsys):
+        patch_discovery(monkeypatch, running=False)
+        monkeypatch.setattr(sys, "argv", ["agentbridge", "start", "--ollama"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "Ollama is not running" in out
+
+
+# ---------------------------------------------------------------------------
+# Ollama startup banner
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaBanner:
+    def make_ollama_config(self):
+        config = BridgeConfig(ollama_mode=True, ollama_model_count=3)
+        config.upstream.name = "ollama"
+        config.upstream.base_url = "http://127.0.0.1:11434/v1"
+        config.upstream.default_model = "qwen2.5-coder:14b"
+        config.upstream.api_key = "ollama"
+        return config
+
+    def test_banner_shows_ollama_discovery(self, capsys):
+        cli.print_startup_banner(self.make_ollama_config())
+        out = capsys.readouterr().out
+        assert "Ollama Auto-Discovery" in out
+        assert "Active (Target: qwen2.5-coder:14b)" in out
+        assert "3" in out
+        assert "ollama" in out
+
+    def test_banner_omits_ollama_rows_in_normal_mode(self, capsys):
+        cli.print_startup_banner(BridgeConfig())
+        out = capsys.readouterr().out
+        assert "Ollama Auto-Discovery" not in out
+
+    def test_start_with_ollama_prints_banner_and_wires_upstream(
+        self, monkeypatch, capsys
+    ):
+        patch_discovery(
+            monkeypatch,
+            models=[OllamaModelInfo(name="qwen2.5-coder:14b", score=185)],
+        )
+        ran = {}
+        monkeypatch.setattr(
+            cli.uvicorn, "run", lambda app, **kw: ran.setdefault("called", True)
+        )
+        monkeypatch.setattr(sys, "argv", ["agentbridge", "start", "--ollama"])
+        cli.main()
+        assert ran.get("called") is True
+        out = capsys.readouterr().out
+        assert "Ollama Auto-Discovery" in out
+        assert "Active (Target: qwen2.5-coder:14b)" in out
+        assert "Provider:" in out
 
 
 # ---------------------------------------------------------------------------

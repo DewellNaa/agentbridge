@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from agentbridge.adapters.anthropic_to_openai import AnthropicToOpenAIAdapter
 from agentbridge.adapters.thinking import ThinkingTransformer
 from agentbridge.config import BridgeConfig, UpstreamConfig
+from agentbridge.context.compactor import ContextCompactor
 from agentbridge.mcp.proxy import MCPProxy
 from agentbridge.providers.factory import create_upstream_client
 from agentbridge.routing.pool import FailoverRouter, UpstreamEndpoint
@@ -82,6 +83,13 @@ def create_app(config: BridgeConfig) -> FastAPI:
     mcp_proxy = (
         MCPProxy(config_path=config.mcp_config_path) if config.enable_mcp else None
     )
+    compactor: ContextCompactor | None = None
+    if config.compact_context or config.max_context_tokens is not None:
+        compactor = ContextCompactor(
+            max_context_tokens=config.max_context_tokens,
+            preserve_recent_turns=config.preserve_recent_turns,
+            max_tool_result_chars=config.max_tool_result_chars,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -106,6 +114,7 @@ def create_app(config: BridgeConfig) -> FastAPI:
     app.state.router = router
     app.state.endpoints = endpoints
     app.state.mcp_proxy = mcp_proxy
+    app.state.compactor = compactor
     telemetry = TelemetryManager()
     app.state.telemetry = telemetry
 
@@ -188,6 +197,15 @@ def create_app(config: BridgeConfig) -> FastAPI:
             # Auto-inject non-duplicate MCP tool declarations so the upstream
             # model becomes aware of the locally relayed MCP tools.
             payload["tools"] = mcp_proxy.inject_tools(payload.get("tools") or [])
+
+        if compactor is not None:
+            # Squeeze the context budget before any protocol conversion.
+            compacted, stats = compactor.compact(
+                payload.get("messages", []), payload.get("system")
+            )
+            payload["messages"] = compacted
+            if stats.get("saved_tokens", 0) > 0:
+                telemetry.record_context_savings(metric, stats["saved_tokens"])
 
         openai_req = adapter.convert_request(payload)
         metric.model_upstream = openai_req.get("model", "")

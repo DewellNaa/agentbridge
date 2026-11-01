@@ -17,6 +17,8 @@
 - **⚡ Zero-Config Local Gateway**: Instant startup via `agentbridge start`, zero database required, lightweight async architecture.
 - **🧠 Full Thinking/Reasoning Translation**: Bridges DeepSeek-R1 / GLM-5.3 `delta.reasoning_content` to Claude 3.7 `thinking` content blocks and back in real-time.
 - **🛡️ Prompt Caching Fault Tolerance**: Automatically detects and sanitizes Anthropic `cache_control: {"type": "ephemeral"}` metadata recursively across system prompts, messages, and tools, preventing `400 Bad Request` errors on standard upstream LLMs.
+- **🔄 Multi-Key Load Balancing & Failover Pool**: Distribute requests evenly across multiple API keys (`round_robin`) and automatically fail over (`priority`) on `429` rate limits, `503` server overloads, or connection timeouts.
+- **✂️ Context Budget Squeezer**: Set `--max-context-tokens` to prevent context length overflows and control token costs by automatically folding giant older `tool_result` outputs while preserving initial user goals and recent turns.
 - **🦙 Ollama Local LLM Auto-Discovery**: Run `agentbridge start --ollama` to automatically discover local Ollama models, benchmark and score coding candidates (`qwen2.5-coder`, `deepseek-r1`), and enable 100% offline, privacy-first AI coding.
 - **🇨🇳 Native Zhipu BigModel / GLM-5.3 Adapter**: First-class support for BigModel authentication, GLM-5.3 / GLM-5.3-Flash model aliasing, thinking effort levels, and SSE streaming normalization.
 - **🔌 Local MCP (Model Context Protocol) Relay**: Auto-discovers `~/.claude/mcp.json` or custom configurations, manages local stdio MCP subprocesses, namespaces tools (`mcp__<server>__<tool>`), and dynamically multiplexes them into agent requests.
@@ -157,6 +159,50 @@ agentbridge config cline
 # Print Continue ~/.continue/config.json models block
 agentbridge config continue
 ```
+
+---
+
+## 🛡️ Multi-Key Load Balancing & Failover Pool
+
+Prevent session interruptions from `429 Too Many Requests` or `503 Service Unavailable`:
+
+```bash
+# Rotate requests across multiple API keys in round-robin
+agentbridge start \
+  --upstream-url "https://api.deepseek.com/v1" \
+  --upstream-keys "key1,key2,key3" \
+  --strategy round_robin
+
+# Automatically fail over to a backup provider if the primary endpoint fails
+agentbridge start \
+  --upstream-url "https://api.deepseek.com/v1" \
+  --upstream-key "deepseek-key" \
+  --fallback-url "https://open.bigmodel.cn/api/paas/v4" \
+  --fallback-key "glm-key" \
+  --fallback-model "glm-5.3-flash"
+```
+
+Check the health and failover status of all pool endpoints in real time:
+```bash
+curl http://127.0.0.1:8080/v1/failover/status
+```
+
+---
+
+## ✂️ Context Budget Squeezer
+
+Keep long agent sessions running smoothly without blowing token budgets or context limits:
+
+```bash
+# Cap context budget at 32k tokens and fold giant tool outputs in older turns
+agentbridge start \
+  --max-context-tokens 32000 \
+  --preserve-recent-turns 4 \
+  --max-tool-chars 1500
+```
+
+- **Phase 1 (Tool Folding)**: Truncates older giant tool outputs (e.g. massive file reads or compiler logs) to head/tail previews while keeping recent turns pristine.
+- **Phase 2 (Turn Folding)**: Seamlessly folds intermediate conversation turns into concise markers while permanently safeguarding the initial user goal and system instructions.
 
 ---
 

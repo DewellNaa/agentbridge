@@ -26,6 +26,8 @@ class RequestMetric:
     status_code: int = 200
     is_stream: bool = True
     error_message: Optional[str] = None
+    # Context tokens saved by the compactor before forwarding upstream.
+    saved_tokens: int = 0
     # High-resolution clock anchor for TTFT / duration measurement.
     _perf_start: float = field(
         default_factory=time.perf_counter, repr=False, compare=False
@@ -45,6 +47,7 @@ class TelemetryManager:
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.total_reasoning_tokens = 0
+        self.total_context_tokens_saved = 0
         self.start_time = time.time()
         self._lock = threading.Lock()
 
@@ -106,6 +109,14 @@ class TelemetryManager:
             if tool_name not in metric.tools_called:
                 metric.tools_called.append(tool_name)
 
+    def record_context_savings(self, metric: RequestMetric, saved: int) -> None:
+        """Accumulate tokens saved by context compaction for this request."""
+        if saved <= 0:
+            return
+        with self._lock:
+            metric.saved_tokens += saved
+            self.total_context_tokens_saved += saved
+
     def finish_request(
         self,
         metric: RequestMetric,
@@ -149,6 +160,7 @@ class TelemetryManager:
                     + self.total_completion_tokens
                     + self.total_reasoning_tokens
                 ),
+                "total_context_tokens_saved": self.total_context_tokens_saved,
                 "avg_duration_ms": (
                     round(sum(m.duration_ms for m in finished) / len(finished), 2)
                     if finished
@@ -177,6 +189,7 @@ class TelemetryManager:
                         "ttft_ms": round(m.ttft_ms, 2),
                         "is_stream": m.is_stream,
                         "tools_called": list(m.tools_called),
+                        "saved_tokens": m.saved_tokens,
                         "error_message": m.error_message,
                     }
                     for m in list(finished)[-10:]

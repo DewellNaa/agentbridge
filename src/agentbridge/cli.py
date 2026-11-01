@@ -110,6 +110,29 @@ def create_parser() -> argparse.ArgumentParser:
         help="Connect to local Ollama with auto-discovery "
         "(optionally specify model name, e.g. --ollama qwen2.5-coder:14b)",
     )
+    start_parser.add_argument(
+        "--max-context-tokens",
+        type=int,
+        default=None,
+        help="Maximum context budget in tokens (auto-enables compaction)",
+    )
+    start_parser.add_argument(
+        "--compact-context",
+        action="store_true",
+        help="Enable smart context compaction for long agent sessions",
+    )
+    start_parser.add_argument(
+        "--preserve-recent-turns",
+        type=int,
+        default=4,
+        help="Number of recent conversation turns to keep untouched",
+    )
+    start_parser.add_argument(
+        "--max-tool-chars",
+        type=int,
+        default=2000,
+        help="Maximum characters per tool output in older turns",
+    )
 
     # ollama command
     subparsers.add_parser(
@@ -216,6 +239,17 @@ def print_startup_banner(config: BridgeConfig):
         table.add_row(
             "[bold cyan]Local Models:[/bold cyan]",
             str(config.ollama_model_count),
+        )
+    if config.compact_context or config.max_context_tokens is not None:
+        budget = (
+            str(config.max_context_tokens)
+            if config.max_context_tokens is not None
+            else "unlimited"
+        )
+        table.add_row(
+            "[bold cyan]Context Compactor:[/bold cyan]",
+            f"Active (Budget: {budget} tokens, "
+            f"Preserve: {config.preserve_recent_turns} turns)",
         )
     if config.enable_mcp:
         mcp_status = "[green]enabled[/green]"
@@ -456,6 +490,14 @@ def main():
             config.upstream.name = "glm"
         if getattr(args, "no_telemetry_log", False):
             config.telemetry_log = False
+        if getattr(args, "max_context_tokens", None) is not None:
+            config.max_context_tokens = args.max_context_tokens
+        if getattr(args, "compact_context", False):
+            config.compact_context = True
+        if getattr(args, "preserve_recent_turns", None) is not None:
+            config.preserve_recent_turns = args.preserve_recent_turns
+        if getattr(args, "max_tool_chars", None) is not None:
+            config.max_tool_result_chars = args.max_tool_chars
 
         ollama_arg = getattr(args, "ollama", None)
         if ollama_arg is not None:

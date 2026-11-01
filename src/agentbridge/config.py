@@ -92,6 +92,13 @@ class BridgeConfig(BaseModel):
     # Number of local models found during Ollama discovery (for the banner)
     ollama_model_count: int = 0
 
+    # Context budget squeezer: compact long histories before forwarding.
+    # A non-None ``max_context_tokens`` auto-enables compaction.
+    max_context_tokens: int | None = None
+    compact_context: bool = False
+    preserve_recent_turns: int = 4
+    max_tool_result_chars: int = 2000
+
     @classmethod
     def from_env(cls) -> "BridgeConfig":
         """Load configuration from environment variables with sensible defaults."""
@@ -146,6 +153,15 @@ class BridgeConfig(BaseModel):
                 **pool_kwargs,
             )
 
+        # Context compaction budget settings.
+        raw_max_context = os.getenv("AGENTBRIDGE_MAX_CONTEXT_TOKENS", "").strip()
+        max_context_tokens: int | None = None
+        if raw_max_context:
+            try:
+                max_context_tokens = int(raw_max_context)
+            except ValueError:
+                max_context_tokens = None
+
         return cls(
             host=os.getenv("AGENTBRIDGE_HOST", "127.0.0.1"),
             port=int(os.getenv("AGENTBRIDGE_PORT", "8080")),
@@ -154,4 +170,13 @@ class BridgeConfig(BaseModel):
             enable_mcp=enable_mcp,
             mcp_config_path=mcp_config_path,
             ollama_mode=ollama_mode,
+            max_context_tokens=max_context_tokens,
+            compact_context=os.getenv("AGENTBRIDGE_COMPACT_CONTEXT", "").strip().lower()
+            in _TRUTHY,
+            preserve_recent_turns=int(
+                os.getenv("AGENTBRIDGE_PRESERVE_RECENT_TURNS", "4")
+            ),
+            max_tool_result_chars=int(
+                os.getenv("AGENTBRIDGE_MAX_TOOL_RESULT_CHARS", "2000")
+            ),
         )

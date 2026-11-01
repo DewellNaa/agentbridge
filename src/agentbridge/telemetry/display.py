@@ -41,6 +41,8 @@ def log_request_metric(
         # Escape the bracketed tool list so Rich markup keeps it literal.
         f"tools: \\[{', '.join(metric.tools_called)}]" if metric.tools_called else None,
     ]
+    if metric.saved_tokens > 0:
+        parts.append(f"[dim](saved {metric.saved_tokens} ctx tokens)[/dim]")
     line = " | ".join(p for p in parts if p is not None)
     if metric.error_message:
         line += f" | [bold red]{metric.error_message}[/bold red]"

@@ -88,6 +88,53 @@ def create_parser() -> argparse.ArgumentParser:
         "-p", "--port", type=int, default=8080, help="Gateway port (default: 8080)"
     )
 
+    # run command
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Launch a coding agent wired to the gateway (auto-starts one if needed)",
+    )
+    run_parser.add_argument(
+        "agent",
+        help="Target agent command (e.g. claude, aider) or any custom command",
+    )
+    run_parser.add_argument(
+        "args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded verbatim to the agent (use -- before agent flags)",
+    )
+    run_parser.add_argument(
+        "--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)"
+    )
+    run_parser.add_argument(
+        "-p", "--port", type=int, default=8080, help="Gateway port (default: 8080)"
+    )
+    run_parser.add_argument(
+        "--no-auto-start",
+        action="store_true",
+        help="Never spawn a background gateway; only connect to an existing one",
+    )
+    run_parser.add_argument(
+        "--upstream-arg",
+        action="append",
+        default=None,
+        metavar="ARG",
+        help="Extra argument passed to the auto-started gateway "
+        "(repeatable, e.g. --upstream-arg=--model=glm-4.6)",
+    )
+
+    # config command
+    config_parser = subparsers.add_parser(
+        "config",
+        help="Print a one-click IDE configuration snippet (cursor, cline, continue)",
+    )
+    config_parser.add_argument("target", help="IDE target: cursor, cline, or continue")
+    config_parser.add_argument(
+        "--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)"
+    )
+    config_parser.add_argument(
+        "-p", "--port", type=int, default=8080, help="Gateway port (default: 8080)"
+    )
+
     return parser
 
 
@@ -158,6 +205,30 @@ def print_metrics_dashboard(host: str, port: int) -> int:
     return 0
 
 
+def run_command(args: argparse.Namespace) -> int:
+    """Handle `agentbridge run`: delegate to the launcher."""
+    from agentbridge.launcher import run_agent
+
+    agent_args = [args.agent, *args.args]
+    while agent_args and agent_args[0] == "--":
+        agent_args.pop(0)
+    return run_agent(
+        agent_args,
+        host=args.host,
+        port=args.port,
+        auto_start=not args.no_auto_start,
+        upstream_args=args.upstream_arg,
+    )
+
+
+def config_command(args: argparse.Namespace) -> int:
+    """Handle `agentbridge config`: print the IDE configuration snippet."""
+    from agentbridge.templates import generate_ide_config
+
+    console.print(generate_ide_config(args.target, host=args.host, port=args.port))
+    return 0
+
+
 def main():
     """Main CLI entrypoint."""
     parser = create_parser()
@@ -192,6 +263,10 @@ def main():
         uvicorn.run(app, host=config.host, port=config.port, log_level="info")
     elif args.command in ("metrics", "status"):
         raise SystemExit(print_metrics_dashboard(args.host, args.port))
+    elif args.command == "run":
+        raise SystemExit(run_command(args))
+    elif args.command == "config":
+        raise SystemExit(config_command(args))
     else:
         parser.print_help()
 

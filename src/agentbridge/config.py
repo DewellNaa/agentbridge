@@ -34,6 +34,10 @@ class BridgeConfig(BaseModel):
     # Thinking token behavior: "passthrough", "thinking_block", "strip"
     thinking_mode: str = "thinking_block"
 
+    # Local MCP relay: auto-discover and re-publish MCP tools to upstreams
+    enable_mcp: bool = False
+    mcp_config_path: str | None = None
+
     @classmethod
     def from_env(cls) -> "BridgeConfig":
         """Load configuration from environment variables with sensible defaults."""
@@ -50,9 +54,18 @@ class BridgeConfig(BaseModel):
             default_model=os.getenv("AGENTBRIDGE_DEFAULT_MODEL", "gpt-4o"),
         )
 
+        enable_mcp = os.getenv("AGENTBRIDGE_ENABLE_MCP", "").strip().lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+        mcp_config_path = os.getenv("AGENTBRIDGE_MCP_CONFIG") or None
+
         return cls(
             host=os.getenv("AGENTBRIDGE_HOST", "127.0.0.1"),
             port=int(os.getenv("AGENTBRIDGE_PORT", "8080")),
             debug=os.getenv("AGENTBRIDGE_DEBUG", "false").lower() == "true",
             upstream=upstream,
+            enable_mcp=enable_mcp,
+            mcp_config_path=mcp_config_path,
         )

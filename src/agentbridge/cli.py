@@ -9,6 +9,7 @@ from rich.table import Table
 
 from agentbridge import __version__
 from agentbridge.config import BridgeConfig
+from agentbridge.providers.factory import detect_provider
 from agentbridge.server import create_app
 
 console = Console()
@@ -52,6 +53,22 @@ def create_parser() -> argparse.ArgumentParser:
     start_parser.add_argument(
         "--debug", action="store_true", help="Enable debug logging"
     )
+    start_parser.add_argument(
+        "--enable-mcp",
+        action="store_true",
+        help="Automatically discover and relay local MCP servers",
+    )
+    start_parser.add_argument(
+        "--mcp-config",
+        default=None,
+        help="Path to custom mcp.json config file",
+    )
+    start_parser.add_argument(
+        "--provider",
+        choices=["auto", "openai", "glm"],
+        default="auto",
+        help="Upstream provider type (default: auto)",
+    )
 
     return parser
 
@@ -70,6 +87,18 @@ def print_startup_banner(config: BridgeConfig):
     table.add_row(
         "[bold cyan]Default Model:[/bold cyan]", config.upstream.default_model
     )
+    provider_type = detect_provider(config.upstream)
+    table.add_row(
+        "[bold cyan]Provider:[/bold cyan]",
+        f"{provider_type} ({config.upstream.name})",
+    )
+    if config.enable_mcp:
+        mcp_status = "[green]enabled[/green]"
+        if config.mcp_config_path:
+            mcp_status += f" [dim]({config.mcp_config_path})[/dim]"
+    else:
+        mcp_status = "[dim]disabled[/dim]"
+    table.add_row("[bold cyan]MCP Relay:[/bold cyan]", mcp_status)
 
     panel = Panel(
         table,
@@ -113,6 +142,12 @@ def main():
             config.upstream.default_model = args.model
         if hasattr(args, "debug") and args.debug:
             config.debug = args.debug
+        if hasattr(args, "enable_mcp") and args.enable_mcp:
+            config.enable_mcp = True
+        if hasattr(args, "mcp_config") and args.mcp_config:
+            config.mcp_config_path = args.mcp_config
+        if getattr(args, "provider", "auto") == "glm":
+            config.upstream.name = "glm"
 
         print_startup_banner(config)
         app = create_app(config)

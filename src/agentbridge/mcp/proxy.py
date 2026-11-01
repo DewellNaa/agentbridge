@@ -356,7 +356,21 @@ class MCPProxy:
         env_var: Optional[str] = DEFAULT_CONFIG_ENV_VAR,
         config_file: Union[str, Path, None] = DEFAULT_CONFIG_FILE,
         transport: Optional[MCPTransport] = None,
+        config_path: Union[str, Path, None] = None,
     ) -> None:
+        """Build a relay.
+
+        Args:
+            config: Inline server configuration (highest priority).
+            env_var: Environment variable holding inline JSON or a file path.
+            config_file: JSON file to fall back to (default
+                ``~/.claude/mcp.json``; missing default file is tolerated).
+            transport: Optional transport override (used by tests).
+            config_path: Explicit path to an ``mcp.json`` file. When given it
+                takes precedence over ``config_file``.
+        """
+        if config_path is not None:
+            config_file = config_path
         self.transport: MCPTransport = transport or StdioMCPTransport()
         self.last_errors: Dict[str, str] = {}
         self.config_sources: List[str] = []
@@ -436,6 +450,11 @@ class MCPProxy:
         """The resolved ``{name: server_config}`` mapping."""
         return dict(self._servers)
 
+    @property
+    def tools(self) -> List[MCPTool]:
+        """Every currently active MCP tool (served from the probe cache)."""
+        return self.list_tools()
+
     def list_tools(
         self,
         server: Optional[str] = None,
@@ -510,6 +529,23 @@ class MCPProxy:
     def refresh(self) -> None:
         """Drop the tool cache so the next probe re-queries every server."""
         self._tool_cache.clear()
+
+    # ------------------------------------------------------------------
+    # Lifecycle (async interface for the gateway server)
+    # ------------------------------------------------------------------
+
+    async def start_all(self) -> None:
+        """Start the relay: probe every configured server for its tools.
+
+        Transport failures are recorded in :attr:`last_errors` and skipped so
+        one broken server never blocks gateway startup.
+        """
+        self.list_tools()
+
+    async def stop_all(self) -> None:
+        """Stop the relay: drop cached tool catalogues and probe errors."""
+        self._tool_cache.clear()
+        self.last_errors = {}
 
     # ------------------------------------------------------------------
     # Execution proxying

@@ -8,18 +8,26 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from agentbridge.adapters.anthropic_to_openai import AnthropicToOpenAIAdapter
 from agentbridge.config import BridgeConfig
-from agentbridge.providers.client import UpstreamClient
+from agentbridge.mcp.proxy import MCPProxy
+from agentbridge.providers.factory import create_upstream_client
 from agentbridge.streaming.sse import format_sse
 
 
 def create_app(config: BridgeConfig) -> FastAPI:
     """Create and configure the FastAPI application."""
     adapter = AnthropicToOpenAIAdapter(model_map=config.model_mapping)
-    client = UpstreamClient(config.upstream)
+    client = create_upstream_client(config.upstream)
+    mcp_proxy = (
+        MCPProxy(config_path=config.mcp_config_path) if config.enable_mcp else None
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if mcp_proxy is not None:
+            await mcp_proxy.start_all()
         yield
+        if mcp_proxy is not None:
+            await mcp_proxy.stop_all()
         await client.close()
 
     app = FastAPI(
@@ -28,6 +36,9 @@ def create_app(config: BridgeConfig) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    app.state.client = client
+    app.state.mcp_proxy = mcp_proxy
 
     @app.get("/health")
     async def health_check():
@@ -58,6 +69,14 @@ def create_app(config: BridgeConfig) -> FastAPI:
             ]
         }
 
+    @app.get("/v1/mcp/tools")
+    async def list_mcp_tools():
+        """Expose the active MCP tool catalogue to management clients."""
+        if mcp_proxy is None:
+            return {"status": "disabled", "tools": [], "count": 0}
+        tools = mcp_proxy.get_anthropic_tools()
+        return {"status": "ok", "tools": tools, "count": len(mcp_proxy.tools)}
+
     @app.post("/v1/messages")
     async def create_message(
         request: Request,
@@ -72,6 +91,12 @@ def create_app(config: BridgeConfig) -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid JSON body")
 
         is_stream = payload.get("stream", False)
+
+        if mcp_proxy is not None:
+            # Auto-inject non-duplicate MCP tool declarations so the upstream
+            # model becomes aware of the locally relayed MCP tools.
+            payload["tools"] = mcp_proxy.inject_tools(payload.get("tools") or [])
+
         openai_req = adapter.convert_request(payload)
 
         if not is_stream:

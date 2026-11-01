@@ -12,6 +12,8 @@
 
 ## ✨ Features
 
+- **🚀 One-Shot Agent Launcher**: Run `agentbridge run claude` or `agentbridge run aider` — automatically manages gateway lifecycle and environment variable injection with zero configuration.
+- **🛠️ Instant IDE Configuration**: Run `agentbridge config <cursor|cline|continue>` to generate drop-in configuration snippets.
 - **⚡ Zero-Config Local Gateway**: Instant startup via `agentbridge start`, zero database required, lightweight async architecture.
 - **🧠 Full Thinking/Reasoning Translation**: Bridges DeepSeek-R1 / GLM-5.3 `delta.reasoning_content` to Claude 3.7 `thinking` content blocks and back in real-time.
 - **🛡️ Prompt Caching Fault Tolerance**: Automatically detects and sanitizes Anthropic `cache_control: {"type": "ephemeral"}` metadata recursively across system prompts, messages, and tools, preventing `400 Bad Request` errors on standard upstream LLMs.
@@ -42,7 +44,22 @@ irm https://raw.githubusercontent.com/DewellNaa/agentbridge/main/scripts/install
 pip install -U "git+https://github.com/DewellNaa/agentbridge.git"
 ```
 
-### 2. Start the Gateway
+### 2. Zero-Config One-Shot Launch (`agentbridge run`)
+
+No manual environment variable configuration required! `agentbridge run` automatically detects whether the gateway is running, launches a background gateway if needed, and injects the proper Anthropic endpoints:
+
+```bash
+# Launch Claude Code directly
+agentbridge run claude
+
+# Pass arguments directly to Claude Code
+agentbridge run claude -- -p "explain src/agentbridge/launcher.py"
+
+# Launch Aider directly
+agentbridge run aider -- --model claude-3-5-sonnet-20241022
+```
+
+### 3. Or Start the Standalone Gateway (`agentbridge start`)
 
 #### Option A: With DeepSeek / OpenAI-compatible upstream
 ```bash
@@ -110,6 +127,23 @@ agentbridge start --enable-mcp --mcp-config /path/to/custom_mcp.json
 
 - Inspect loaded MCP tools via `curl http://127.0.0.1:8080/v1/mcp/tools`.
 - Tools are namespaced as `mcp__<server>__<tool>` to prevent collision with native agent tools.
+
+---
+
+## 🛠️ Instant IDE Configuration (`agentbridge config`)
+
+Generate ready-to-paste configurations for Cursor, VS Code Cline, or Continue with one command:
+
+```bash
+# Print Cursor setup guide & .cursorrules snippet
+agentbridge config cursor
+
+# Print VS Code Cline settings snippet
+agentbridge config cline
+
+# Print Continue ~/.continue/config.json models block
+agentbridge config continue
+```
 
 ---
 

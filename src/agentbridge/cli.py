@@ -69,6 +69,24 @@ def create_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Upstream provider type (default: auto)",
     )
+    start_parser.add_argument(
+        "--no-telemetry-log",
+        action="store_true",
+        help="Disable per-request telemetry logs in the console",
+    )
+
+    # metrics command
+    metrics_parser = subparsers.add_parser(
+        "metrics",
+        aliases=["status"],
+        help="Show telemetry dashboard of a running gateway",
+    )
+    metrics_parser.add_argument(
+        "--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)"
+    )
+    metrics_parser.add_argument(
+        "-p", "--port", type=int, default=8080, help="Gateway port (default: 8080)"
+    )
 
     return parser
 
@@ -122,12 +140,30 @@ def print_startup_banner(config: BridgeConfig):
     )
 
 
+def print_metrics_dashboard(host: str, port: int) -> int:
+    """Fetch /v1/telemetry from a running gateway and render the dashboard."""
+    import httpx
+
+    from agentbridge.telemetry.display import render_summary_panel
+
+    url = f"http://{host}:{port}/v1/telemetry"
+    try:
+        resp = httpx.get(url, timeout=5.0)
+        resp.raise_for_status()
+        summary = resp.json()
+    except Exception as exc:
+        console.print(f"[bold red]Failed to query gateway at {url}:[/bold red] {exc}")
+        return 1
+    console.print(render_summary_panel(summary))
+    return 0
+
+
 def main():
     """Main CLI entrypoint."""
     parser = create_parser()
     args = parser.parse_args()
 
-    if args.command is None or args.command == "start":
+    if args.command in (None, "start"):
         config = BridgeConfig.from_env()
 
         if hasattr(args, "host") and args.host:
@@ -148,10 +184,14 @@ def main():
             config.mcp_config_path = args.mcp_config
         if getattr(args, "provider", "auto") == "glm":
             config.upstream.name = "glm"
+        if getattr(args, "no_telemetry_log", False):
+            config.telemetry_log = False
 
         print_startup_banner(config)
         app = create_app(config)
         uvicorn.run(app, host=config.host, port=config.port, log_level="info")
+    elif args.command in ("metrics", "status"):
+        raise SystemExit(print_metrics_dashboard(args.host, args.port))
     else:
         parser.print_help()
 

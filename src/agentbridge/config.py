@@ -38,6 +38,9 @@ class BridgeConfig(BaseModel):
     enable_mcp: bool = False
     mcp_config_path: str | None = None
 
+    # Console logging of per-request metrics (disable via --no-telemetry-log)
+    telemetry_log: bool = True
+
     @classmethod
     def from_env(cls) -> "BridgeConfig":
         """Load configuration from environment variables with sensible defaults."""
